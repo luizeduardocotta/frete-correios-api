@@ -1,14 +1,10 @@
-netlify/functions/frete.js
-
 export async function handler(event) {
   try {
     const body = JSON.parse(event.body);
 
     const { cep_origem, cep_destino, peso, comprimento, altura, largura } = body;
 
-    const url = "https://www.melhorenvio.com.br/api/v2/me/shipment/calculate";
-
-    const response = await fetch(url, {
+    const response = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
       method: "POST",
       headers: {
         "Accept": "application/json",
