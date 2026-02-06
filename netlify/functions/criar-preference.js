@@ -17,22 +17,18 @@ exports.handler = async (event) => {
         const body = JSON.parse(event.body);
         const { items, loja_id, payer } = body;
 
-        // 1. Busca os tokens na tabela 'lojas'
+        // 1. Busca o token no Supabase
         const { data: loja, error: erroLoja } = await supabase
             .from('lojas')
-            .select('mp_access_token') // Nome confirmado pelo seu SQL
+            .select('mp_access_token')
             .eq('id', loja_id)
             .single();
 
         if (erroLoja || !loja?.mp_access_token) {
-            return { 
-                statusCode: 400, 
-                headers, 
-                body: JSON.stringify({ erro: "Loja não encontrada ou mp_access_token ausente no banco." }) 
-            };
+            return { statusCode: 400, headers, body: JSON.stringify({ erro: "Token não configurado no banco." }) };
         }
 
-        // 2. Chamada ao Mercado Pago
+        // 2. Chamada ao Mercado Pago com back_urls fixas
         const mpResponse = await fetch("https://api.mercadopago.com/checkout/preferences", {
             method: "POST",
             headers: {
@@ -43,12 +39,15 @@ exports.handler = async (event) => {
                 items: items,
                 payer: {
                     name: payer?.name || "Cliente",
-                    email: payer?.email || "comprador@email.com"
+                    email: payer?.email || "comprador@email.com",
+                    address: {
+                        street_name: payer?.address?.street_name || "Endereço não informado"
+                    }
                 },
                 back_urls: {
-                    success: `${event.headers.origin}/sucesso.html`,
-                    failure: `${event.headers.origin}/index.html`,
-                    pending: `${event.headers.origin}/pendente.html`
+                    success: "https://portallagoasanta.com.br/",
+                    failure: "https://portallagoasanta.com.br/",
+                    pending: "https://portallagoasanta.com.br/"
                 },
                 auto_return: "approved"
             })
@@ -56,26 +55,13 @@ exports.handler = async (event) => {
 
         const result = await mpResponse.json();
 
-        // Se o Mercado Pago retornar erro, enviamos o objeto de erro real para o seu index.html
         if (!mpResponse.ok) {
-            return { 
-                statusCode: mpResponse.status, 
-                headers, 
-                body: JSON.stringify({ erro: "Erro no Mercado Pago", detalhes: result }) 
-            };
+            return { statusCode: mpResponse.status, headers, body: JSON.stringify({ erro: "Erro MP", detalhes: result }) };
         }
 
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({ init_point: result.init_point })
-        };
+        return { statusCode: 200, headers, body: JSON.stringify({ init_point: result.init_point }) };
 
     } catch (err) {
-        return { 
-            statusCode: 500, 
-            headers, 
-            body: JSON.stringify({ erro: err.message }) 
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ erro: err.message }) };
     }
 };
