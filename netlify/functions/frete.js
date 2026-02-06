@@ -8,56 +8,47 @@ exports.handler = async (event) => {
         "Content-Type": "application/json"
     };
 
-    if (event.httpMethod === "OPTIONS") {
-        return { statusCode: 200, headers, body: "" };
-    }
+    if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
 
     try {
-        if (!event.body) {
-            return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
-        }
+        if (!event.body) return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
 
         const body = JSON.parse(event.body);
         
-        // Limpeza rigorosa dos CEPs
-        const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "") : "";
-        const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "") : "";
+        // Limpeza rigorosa: remove traços e espaços do CEP enviado pelo HTML
+        const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "").substring(0, 8) : "";
+        const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "").substring(0, 8) : "";
         const itens = body.itens || [];
 
-        // Validação de CEP
-        if (cep_origem.length !== 8 || cep_destino.length !== 8) {
+        // Validação de segurança
+        if (cep_origem.length < 8 || cep_destino.length < 8) {
             return { 
                 statusCode: 400, 
                 headers, 
-                body: JSON.stringify({ erro: "CEP inválido", detalhes: "O CEP deve ter 8 dígitos." }) 
+                body: JSON.stringify({ erro: "CEP inválido", detalhes: `Origem: ${cep_origem}, Destino: ${cep_destino}` }) 
             };
         }
 
-        // 4. Cálculo de Peso e Dimensões baseado no seu HTML
+        // Cálculo de peso e dimensões (Padrão para evitar erro de 'Data Invalid')
         let pesoTotal = 0;
-        let maxLargura = 11;
-        let maxAltura = 2;
-        let maxComprimento = 16;
+        let maxLargura = 11, maxAltura = 2, maxComprimento = 16;
 
         itens.forEach(item => {
             const qtd = parseInt(item.quantidade) || 1;
-            // O seu HTML envia 'peso', 'largura', 'altura', 'comprimento'
+            // Pegando os nomes dos campos que você mapeou no seu HTML
             pesoTotal += (parseFloat(item.peso) || 0.3) * qtd;
-            
-            // O Melhor Envio exige dimensões mínimas. Se o produto for menor, usamos o mínimo.
             maxLargura = Math.max(maxLargura, parseInt(item.largura) || 11);
             maxAltura = Math.max(maxAltura, (parseInt(item.altura) || 2) * qtd);
             maxComprimento = Math.max(maxComprimento, parseInt(item.comprimento) || 16);
         });
 
-        // 5. Chamada para o Melhor Envio
         const meResponse = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
             method: "POST",
             headers: {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
-                "User-Agent": "Avant Digital (suporte@avant.com.br)"
+                "User-Agent": "Avant Shop (suporte@avant.com.br)"
             },
             body: JSON.stringify({
                 from: { postal_code: cep_origem },
@@ -76,15 +67,15 @@ exports.handler = async (event) => {
 
         const data = await meResponse.json();
 
-        // Se a API retornar erro de validação (o seu erro atual)
-        if (data.errors) {
+        // Se o Melhor Envio recusar o CEP de origem novamente
+        if (data.errors || data.message === "The given data was invalid.") {
             return {
-                statusCode: 200,
+                statusCode: 200, 
                 headers,
                 body: JSON.stringify({ 
-                    erro: "Dados rejeitados pelo Melhor Envio", 
-                    detalhes: "Verifique se o peso ou dimensões dos produtos no banco estão corretos.",
-                    causa: data.errors 
+                    erro: "Erro no CEP ou Dados", 
+                    detalhes: "O Melhor Envio não aceitou este CEP de origem. Verifique se ele é atendido na sua conta.",
+                    causa: data.errors || data.message
                 })
             };
         }
@@ -97,17 +88,9 @@ exports.handler = async (event) => {
                 prazo: s.delivery_time || s.deadline
             })) : [];
 
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({ opcoes })
-        };
+        return { statusCode: 200, headers, body: JSON.stringify({ opcoes }) };
 
     } catch (err) {
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ erro: "Erro interno", detalhes: err.message })
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ erro: err.message }) };
     }
 };
