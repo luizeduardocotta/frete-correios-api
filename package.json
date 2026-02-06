@@ -1,0 +1,14 @@
+{
+  "name": "loja-online-multitenant",
+  "version": "1.0.0",
+  "description": "Sistema de lojas online com Supabase e Mercado Pago",
+  "main": "index.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "node-fetch": "^2.7.0",
+    "mercadopago": "^2.0.15"
+  },
+  "scripts": {
+    "build": "echo 'Build completed'"
+  }
+}
