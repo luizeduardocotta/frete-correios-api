@@ -4,7 +4,6 @@ const fetch = require('node-fetch');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
-    // 1. Cabeçalhos que liberam o acesso do seu site (CORS)
     const headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -12,16 +11,21 @@ exports.handler = async (event) => {
         "Content-Type": "application/json"
     };
 
-    // 2. Resposta obrigatória para o navegador (Preflight)
     if (event.httpMethod === "OPTIONS") {
         return { statusCode: 200, headers, body: "" };
     }
 
     try {
+        if (!event.body) {
+            return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
+        }
+
         const body = JSON.parse(event.body);
         const { items, loja_id } = body;
 
-        // 3. Busca o token da loja no Supabase
+        if (!loja_id) throw new Error("ID da loja não informado.");
+
+        // 1. Busca o token dinâmico da loja no Supabase
         const { data: loja, error: erroLoja } = await supabase
             .from('lojas')
             .select('mp_access_token')
@@ -30,7 +34,7 @@ exports.handler = async (event) => {
 
         if (erroLoja || !loja?.mp_access_token) throw new Error("Loja não encontrada ou token ausente.");
 
-        // 4. Cria a Preferência no Mercado Pago (Checkout Pro)
+        // 2. Cria a Preferência no Mercado Pago
         const mpResponse = await fetch("https://api.mercadopago.com/checkout/preferences", {
             method: "POST",
             headers: {
@@ -50,7 +54,6 @@ exports.handler = async (event) => {
 
         const result = await mpResponse.json();
 
-        // 5. Retorna o link (init_point) com os headers de CORS
         return {
             statusCode: 200,
             headers,
@@ -58,7 +61,6 @@ exports.handler = async (event) => {
         };
 
     } catch (err) {
-        console.error("Erro na função:", err.message);
         return {
             statusCode: 500,
             headers,
