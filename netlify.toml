@@ -1,10 +1,17 @@
-[[plugins]]
-  package = "@netlify/plugin-functions-install-core"
+[build]
+  # O comando de build instala as dependências do package.json
+  command = "npm install"
+  # Indica onde as funções estão (mude se sua pasta tiver outro nome)
+  functions = "netlify/functions"
+  # Onde está o seu index.html
+  publish = "."
 
 [[headers]]
-  for = "/.netlify/functions/*"
+  for = "/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
 
+# Remova o plugin "@netlify/plugin-functions-install-core" 
+# O Netlify moderno já faz isso automaticamente.
