@@ -1,18 +1,30 @@
 export async function handler(event) {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS"
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json"
   };
 
+  // 1. Resposta para o Preflight (CORS)
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers, body: "" };
   }
 
   try {
-    const body = JSON.parse(event.body || "{}");
+    // 2. Verificação de corpo vazio
+    if (!event.body) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ erro: "Corpo da requisição vazio" })
+      };
+    }
+
+    const body = JSON.parse(event.body);
     const { cep_origem, cep_destino, itens } = body;
 
+    // 3. Validação de dados obrigatórios
     if (!cep_origem || !cep_destino || !Array.isArray(itens) || itens.length === 0) {
       return {
         statusCode: 400,
@@ -21,7 +33,7 @@ export async function handler(event) {
       };
     }
 
-    // Soma pesos e calcula volume
+    // 4. Cálculo de Peso e Volume
     let pesoTotal = 0;
     let volume = { largura: 0, altura: 0, comprimento: 0 };
 
@@ -32,6 +44,7 @@ export async function handler(event) {
       volume.comprimento = Math.max(volume.comprimento, Number(p.comprimento) || 16);
     });
 
+    // 5. Chamada ao Melhor Envio
     const response = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
       method: "POST",
       headers: {
@@ -55,16 +68,14 @@ export async function handler(event) {
     });
 
     const data = await response.json();
-    console.log("Resposta bruta do Melhor Envio:", JSON.stringify(data));
 
-    // Se não for array, o Melhor Envio retornou um erro (ex: Token Inválido)
     if (!Array.isArray(data)) {
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({ 
-          erro: "Erro na comunicação com Melhor Envio", 
-          detalhes: data.message || "Verifique o Token na Netlify",
+          erro: "Erro Melhor Envio", 
+          detalhes: data.message || "Verifique o Token",
           raw: data 
         })
       };
@@ -85,7 +96,6 @@ export async function handler(event) {
     };
 
   } catch (err) {
-    console.error("Erro na function:", err);
     return {
       statusCode: 500,
       headers,
