@@ -1,3 +1,5 @@
+const fetch = require('node-fetch');
+
 export async function handler(event) {
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -12,62 +14,70 @@ export async function handler(event) {
   }
 
   try {
-    // 2. Verificação de corpo vazio
     if (!event.body) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ erro: "Corpo da requisição vazio" })
-      };
+      return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
     }
 
     const body = JSON.parse(event.body);
-    const { cep_origem, cep_destino, itens } = body;
+    
+    // Limpeza de CEP: Remove traços e espaços
+    const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "") : "";
+    const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "") : "";
+    const itens = body.itens || [];
 
-    // 3. Validação de dados obrigatórios
-    if (!cep_origem || !cep_destino || !Array.isArray(itens) || itens.length === 0) {
+    // 2. Validação básica
+    if (cep_origem.length !== 8 || cep_destino.length !== 8 || itens.length === 0) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ erro: "Dados incompletos", recebido: body })
+        body: JSON.stringify({ 
+          erro: "Dados inválidos", 
+          detalhes: "Verifique os CEPs (8 dígitos) e se o carrinho não está vazio." 
+        })
       };
     }
 
-    // 4. Cálculo de Peso e Volume
+    // 3. Cálculo de Peso e Dimensões (Lógica de Cubagem)
     let pesoTotal = 0;
-    let volume = { largura: 0, altura: 0, comprimento: 0 };
+    let maxLargura = 11;
+    let maxAltura = 2; // Mínimo Melhor Envio
+    let maxComprimento = 16;
 
-    itens.forEach(p => {
-      pesoTotal += Number(p.peso) || 0.3;
-      volume.largura = Math.max(volume.largura, Number(p.largura) || 11);
-      volume.altura = Math.max(volume.altura, Number(p.altura) || 11);
-      volume.comprimento = Math.max(volume.comprimento, Number(p.comprimento) || 16);
+    itens.forEach(item => {
+      const q = parseInt(item.quantidade) || 1;
+      pesoTotal += (parseFloat(item.peso) || 0.3) * q;
+      
+      // Para dimensões, pegamos o maior lado dos itens no carrinho
+      maxLargura = Math.max(maxLargura, parseInt(item.largura) || 11);
+      maxAltura = Math.max(maxAltura, (parseInt(item.altura) || 2) * q); // Altura acumula se empilhar
+      maxComprimento = Math.max(maxComprimento, parseInt(item.comprimento) || 16);
     });
 
-    // 5. Chamada ao Melhor Envio
-    const response = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
+    // 4. Chamada ao Melhor Envio
+    const meResponse = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
       method: "POST",
       headers: {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
-        "User-Agent": "Avant Digital"
+        "User-Agent": "Avant Digital (contato@seudominio.com)"
       },
       body: JSON.stringify({
         from: { postal_code: cep_origem },
         to: { postal_code: cep_destino },
         products: [{
+          id: "carrinho",
           weight: pesoTotal,
-          width: volume.largura,
-          height: volume.altura,
-          length: volume.comprimento,
-          insurance_value: 50,
+          width: maxLargura,
+          height: maxAltura,
+          length: maxComprimento,
+          insurance_value: 50, // Seguro mínimo
           quantity: 1
         }]
       })
     });
 
-    const data = await response.json();
+    const data = await meResponse.json();
 
     if (!Array.isArray(data)) {
       return {
@@ -75,18 +85,19 @@ export async function handler(event) {
         headers,
         body: JSON.stringify({ 
           erro: "Erro Melhor Envio", 
-          detalhes: data.message || "Verifique o Token",
+          detalhes: data.message || "Resposta inválida",
           raw: data 
         })
       };
     }
 
+    // 5. Filtrar apenas opções válidas
     const opcoes = data
-      .filter(s => !s.error) 
+      .filter(s => !s.error && s.price)
       .map(s => ({
         nome: s.name,
-        valor: Number(s.price),
-        prazo: Number(s.delivery_time || s.deadline)
+        valor: parseFloat(s.price),
+        prazo: s.delivery_time || s.deadline
       }));
 
     return {
@@ -99,7 +110,7 @@ export async function handler(event) {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ erro: err.message })
+      body: JSON.stringify({ erro: "Erro interno", detalhes: err.message })
     };
   }
 }
