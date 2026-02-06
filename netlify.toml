@@ -7,7 +7,7 @@
   publish = "."
 
 [[headers]]
-  for = "/*"
+  for = "/.netlify/functions/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
@@ -15,3 +15,4 @@
 
 # Remova o plugin "@netlify/plugin-functions-install-core" 
 # O Netlify moderno já faz isso automaticamente.
+
