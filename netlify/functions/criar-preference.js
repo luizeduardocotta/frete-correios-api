@@ -11,41 +11,43 @@ exports.handler = async (event) => {
         "Content-Type": "application/json"
     };
 
-    if (event.httpMethod === "OPTIONS") {
-        return { statusCode: 200, headers, body: "" };
-    }
+    if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
 
     try {
-        if (!event.body) {
-            return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
-        }
-
         const body = JSON.parse(event.body);
-        const { items, loja_id } = body;
+        const { items, loja_id, payer } = body;
 
-        if (!loja_id) throw new Error("ID da loja não informado.");
-
-        // 1. Busca o token dinâmico da loja no Supabase
+        // 1. Busca os tokens na tabela 'lojas'
         const { data: loja, error: erroLoja } = await supabase
             .from('lojas')
-            .select('mp_access_token')
+            .select('mp_access_token') // Nome confirmado pelo seu SQL
             .eq('id', loja_id)
             .single();
 
-        if (erroLoja || !loja?.mp_access_token) throw new Error("Loja não encontrada ou token ausente.");
+        if (erroLoja || !loja?.mp_access_token) {
+            return { 
+                statusCode: 400, 
+                headers, 
+                body: JSON.stringify({ erro: "Loja não encontrada ou mp_access_token ausente no banco." }) 
+            };
+        }
 
-        // 2. Cria a Preferência no Mercado Pago
+        // 2. Chamada ao Mercado Pago
         const mpResponse = await fetch("https://api.mercadopago.com/checkout/preferences", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${loja.mp_access_token}`
+                "Authorization": `Bearer ${loja.mp_access_token.trim()}`
             },
             body: JSON.stringify({
                 items: items,
+                payer: {
+                    name: payer?.name || "Cliente",
+                    email: payer?.email || "comprador@email.com"
+                },
                 back_urls: {
                     success: `${event.headers.origin}/sucesso.html`,
-                    failure: `${event.headers.origin}/carrinho.html`,
+                    failure: `${event.headers.origin}/index.html`,
                     pending: `${event.headers.origin}/pendente.html`
                 },
                 auto_return: "approved"
@@ -54,6 +56,15 @@ exports.handler = async (event) => {
 
         const result = await mpResponse.json();
 
+        // Se o Mercado Pago retornar erro, enviamos o objeto de erro real para o seu index.html
+        if (!mpResponse.ok) {
+            return { 
+                statusCode: mpResponse.status, 
+                headers, 
+                body: JSON.stringify({ erro: "Erro no Mercado Pago", detalhes: result }) 
+            };
+        }
+
         return {
             statusCode: 200,
             headers,
@@ -61,10 +72,10 @@ exports.handler = async (event) => {
         };
 
     } catch (err) {
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ erro: err.message })
+        return { 
+            statusCode: 500, 
+            headers, 
+            body: JSON.stringify({ erro: err.message }) 
         };
     }
 };
