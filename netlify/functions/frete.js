@@ -1,116 +1,73 @@
 const fetch = require('node-fetch');
 
-export async function handler(event) {
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Content-Type": "application/json"
-  };
-
-  // 1. Resposta para o Preflight (CORS)
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers, body: "" };
-  }
-
-  try {
-    if (!event.body) {
-      return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
-    }
-
-    const body = JSON.parse(event.body);
-    
-    // Limpeza de CEP: Remove traços e espaços
-    const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "") : "";
-    const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "") : "";
-    const itens = body.itens || [];
-
-    // 2. Validação básica
-    if (cep_origem.length !== 8 || cep_destino.length !== 8 || itens.length === 0) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ 
-          erro: "Dados inválidos", 
-          detalhes: "Verifique os CEPs (8 dígitos) e se o carrinho não está vazio." 
-        })
-      };
-    }
-
-    // 3. Cálculo de Peso e Dimensões (Lógica de Cubagem)
-    let pesoTotal = 0;
-    let maxLargura = 11;
-    let maxAltura = 2; // Mínimo Melhor Envio
-    let maxComprimento = 16;
-
-    itens.forEach(item => {
-      const q = parseInt(item.quantidade) || 1;
-      pesoTotal += (parseFloat(item.peso) || 0.3) * q;
-      
-      // Para dimensões, pegamos o maior lado dos itens no carrinho
-      maxLargura = Math.max(maxLargura, parseInt(item.largura) || 11);
-      maxAltura = Math.max(maxAltura, (parseInt(item.altura) || 2) * q); // Altura acumula se empilhar
-      maxComprimento = Math.max(maxComprimento, parseInt(item.comprimento) || 16);
-    });
-
-    // 4. Chamada ao Melhor Envio
-    const meResponse = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
-        "User-Agent": "Avant Digital (contato@seudominio.com)"
-      },
-      body: JSON.stringify({
-        from: { postal_code: cep_origem },
-        to: { postal_code: cep_destino },
-        products: [{
-          id: "carrinho",
-          weight: pesoTotal,
-          width: maxLargura,
-          height: maxAltura,
-          length: maxComprimento,
-          insurance_value: 50, // Seguro mínimo
-          quantity: 1
-        }]
-      })
-    });
-
-    const data = await meResponse.json();
-
-    if (!Array.isArray(data)) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ 
-          erro: "Erro Melhor Envio", 
-          detalhes: data.message || "Resposta inválida",
-          raw: data 
-        })
-      };
-    }
-
-    // 5. Filtrar apenas opções válidas
-    const opcoes = data
-      .filter(s => !s.error && s.price)
-      .map(s => ({
-        nome: s.name,
-        valor: parseFloat(s.price),
-        prazo: s.delivery_time || s.deadline
-      }));
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ opcoes })
+exports.handler = async (event) => {
+    // Headers de CORS - ESSENCIAIS
+    const headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Content-Type": "application/json"
     };
 
-  } catch (err) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ erro: "Erro interno", detalhes: err.message })
-    };
-  }
-}
+    // Resposta imediata para o navegador liberar o acesso (Preflight)
+    if (event.httpMethod === "OPTIONS") {
+        return { statusCode: 200, headers, body: "" };
+    }
+
+    try {
+        if (!event.body) {
+            return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
+        }
+
+        const body = JSON.parse(event.body);
+        const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "") : "";
+        const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "") : "";
+        const itens = body.itens || [];
+
+        if (cep_origem.length !== 8 || cep_destino.length !== 8) {
+            return { statusCode: 400, headers, body: JSON.stringify({ erro: "CEP inválido" }) };
+        }
+
+        // Cálculo simplificado para teste
+        let pesoTotal = 0;
+        itens.forEach(i => pesoTotal += (parseFloat(i.peso) || 0.3) * (i.quantidade || 1));
+
+        const response = await fetch("https://www.melhorenvio.com.br/api/v2/me/shipment/calculate", {
+            method: "POST",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
+                "User-Agent": "Avant Digital"
+            },
+            body: JSON.stringify({
+                from: { postal_code: cep_origem },
+                to: { postal_code: cep_destino },
+                products: [{
+                    weight: pesoTotal,
+                    width: 11, height: 11, length: 16,
+                    insurance_value: 50, quantity: 1
+                }]
+            })
+        });
+
+        const data = await response.json();
+
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({ opcoes: Array.isArray(data) ? data.filter(s => !s.error).map(s => ({
+                nome: s.name,
+                valor: parseFloat(s.price),
+                prazo: s.delivery_time || s.deadline
+            })) : [], raw: data })
+        };
+
+    } catch (err) {
+        return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ erro: err.message })
+        };
+    }
+};
