@@ -14,28 +14,15 @@ exports.handler = async (event) => {
         if (!event.body) return { statusCode: 400, headers, body: JSON.stringify({ erro: "Corpo vazio" }) };
 
         const body = JSON.parse(event.body);
-        
-        // Limpeza rigorosa: remove traços e espaços do CEP enviado pelo HTML
         const cep_origem = body.cep_origem ? body.cep_origem.replace(/\D/g, "").substring(0, 8) : "";
         const cep_destino = body.cep_destino ? body.cep_destino.replace(/\D/g, "").substring(0, 8) : "";
         const itens = body.itens || [];
 
-        // Validação de segurança
-        if (cep_origem.length < 8 || cep_destino.length < 8) {
-            return { 
-                statusCode: 400, 
-                headers, 
-                body: JSON.stringify({ erro: "CEP inválido", detalhes: `Origem: ${cep_origem}, Destino: ${cep_destino}` }) 
-            };
-        }
-
-        // Cálculo de peso e dimensões (Padrão para evitar erro de 'Data Invalid')
         let pesoTotal = 0;
         let maxLargura = 11, maxAltura = 2, maxComprimento = 16;
 
         itens.forEach(item => {
             const qtd = parseInt(item.quantidade) || 1;
-            // Pegando os nomes dos campos que você mapeou no seu HTML
             pesoTotal += (parseFloat(item.peso) || 0.3) * qtd;
             maxLargura = Math.max(maxLargura, parseInt(item.largura) || 11);
             maxAltura = Math.max(maxAltura, (parseInt(item.altura) || 2) * qtd);
@@ -48,7 +35,7 @@ exports.handler = async (event) => {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
-                "User-Agent": "Avant Shop (suporte@avant.com.br)"
+                "User-Agent": "Avant Shop"
             },
             body: JSON.stringify({
                 from: { postal_code: cep_origem },
@@ -67,16 +54,11 @@ exports.handler = async (event) => {
 
         const data = await meResponse.json();
 
-        // Se o Melhor Envio recusar o CEP de origem novamente
         if (data.errors || data.message === "The given data was invalid.") {
             return {
                 statusCode: 200, 
                 headers,
-                body: JSON.stringify({ 
-                    erro: "Erro no CEP ou Dados", 
-                    detalhes: "O Melhor Envio não aceitou este CEP de origem. Verifique se ele é atendido na sua conta.",
-                    causa: data.errors || data.message
-                })
+                body: JSON.stringify({ erro: "Erro nos dados", causa: data.errors || data.message })
             };
         }
 
