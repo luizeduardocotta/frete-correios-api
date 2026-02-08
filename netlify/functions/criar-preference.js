@@ -44,6 +44,14 @@ exports.handler = async (event) => {
                         street_name: payer?.address?.street_name || "Endereço não informado"
                     }
                 },
+                payment_methods: {
+                    included_payment_types: [
+                        { id: "ticket" },        // Boleto
+                        { id: "bank_transfer" }, // PIX
+                        { id: "credit_card" }    // Cartão
+                    ],
+                    installments: 12
+                },
                 back_urls: {
                     success: "https://portallagoasanta.com.br/",
                     failure: "https://portallagoasanta.com.br/",
