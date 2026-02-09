@@ -27,23 +27,48 @@ exports.handler = async (event) => {
       payer,
       tipo_frete,
       valor_frete,
-      valor_total,
+      valor_total, // 🔎 só para debug
       cliente
     } = body;
 
-    // 🔎 Logs úteis
-    console.log("Criando pedido:", { loja_id, valor_total });
+    if (!items || !items.length) {
+      throw new Error("Itens do pedido não informados");
+    }
 
-    // 1️⃣ Cria pedido PENDENTE
+    if (!loja_id) {
+      throw new Error("Loja não informada");
+    }
+
+    // 🔢 1️⃣ CALCULA TOTAL NO BACKEND (REGRA DE OURO)
+    const subtotal = items.reduce((acc, item) => {
+      return acc + (Number(item.unit_price) * Number(item.quantity));
+    }, 0);
+
+    const frete = Number(valor_frete) || 0;
+    const totalCalculado = Number((subtotal + frete).toFixed(2));
+
+    if (!totalCalculado || totalCalculado <= 0) {
+      throw new Error("Total inválido");
+    }
+
+    // 🧪 LOG DE DEBUG (ESSENCIAL)
+    console.log("DEBUG PEDIDO:", {
+      subtotal,
+      frete,
+      totalCalculado,
+      valor_total_recebido: valor_total
+    });
+
+    // 2️⃣ CRIA PEDIDO PENDENTE NO SUPABASE
     const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
       .insert({
-        loja_id: loja_id || null,
+        loja_id,
         cliente_id: cliente?.id || null,
         nome_cliente: cliente?.nome || payer?.name || null,
         whatsapp: cliente?.whatsapp || null,
-        total: Number(valor_total),
-        frete: Number(valor_frete) || 0,
+        total: totalCalculado,        // ✅ NUNCA NULL
+        frete: frete,
         tipo_frete: tipo_frete || null,
         status: "Pendente",
         metodo_pagamento: "Mercado Pago"
@@ -56,7 +81,7 @@ exports.handler = async (event) => {
       throw new Error(erroPedido.message);
     }
 
-    // 2️⃣ Busca token do Mercado Pago
+    // 3️⃣ BUSCA TOKEN DO MERCADO PAGO DA LOJA
     const { data: loja, error: erroLoja } = await supabase
       .from('lojas')
       .select('mp_access_token')
@@ -67,7 +92,7 @@ exports.handler = async (event) => {
       throw new Error("Token do Mercado Pago não configurado");
     }
 
-    // 3️⃣ Cria preferência no Mercado Pago
+    // 4️⃣ CRIA PREFERENCE NO MERCADO PAGO
     const mpResponse = await fetch(
       "https://api.mercadopago.com/checkout/preferences",
       {
@@ -79,6 +104,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({
           items,
           payer,
+          external_reference: String(pedido.id), // 🔥 BOA PRÁTICA
           back_urls: {
             success: "https://portallagoasanta.com.br/",
             failure: "https://portallagoasanta.com.br/",
@@ -92,16 +118,19 @@ exports.handler = async (event) => {
     const result = await mpResponse.json();
 
     if (!mpResponse.ok) {
-      throw new Error(JSON.stringify(result));
+      console.error("Erro Mercado Pago:", result);
+      throw new Error("Erro ao criar preferência no Mercado Pago");
     }
 
-    // 4️⃣ Atualiza pedido com preference_id
+    // 5️⃣ ATUALIZA PEDIDO COM mp_preference_id
     await supabase
       .from('pedidos')
-      .update({ mp_preference_id: result.id })
+      .update({
+        mp_preference_id: result.id
+      })
       .eq('id', pedido.id);
 
-    // 5️⃣ Retorna init_point
+    // 6️⃣ RETORNA INIT_POINT
     return {
       statusCode: 200,
       headers,
@@ -112,7 +141,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error("Erro geral:", err);
+    console.error("Erro geral criar-preference:", err);
     return {
       statusCode: 500,
       headers,
