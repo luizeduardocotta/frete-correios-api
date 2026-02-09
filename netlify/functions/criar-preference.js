@@ -60,25 +60,21 @@ exports.handler = async (event) => {
 
     // 2️⃣ CRIA PEDIDO PENDENTE
     const { data: pedido, error: erroPedido } = await supabase
-      .from('pedidos')
-      .insert({
-        loja_id, // 🔥 FUNDAMENTAL para multi-loja
-        cliente_id: cliente?.id || null,
-        nome_cliente: cliente?.nome || payer?.name || null,
-        whatsapp: cliente?.whatsapp || null,
-        email_cliente: payer?.email || null,
+  .from('pedidos')
+  .insert({
+    loja_id, // UUID obrigatório
+    cliente_id: cliente?.id || null,
+    nome_cliente: cliente?.nome || payer?.name || null,
+    whatsapp: cliente?.whatsapp || null,
+    total: totalCalculado,
+    frete: frete,
+    tipo_frete: tipo_frete || null,
+    status: "Pendente",
+    metodo_pagamento: "Mercado Pago"
+  })
+  .select()
+  .single();
 
-        total: totalCalculado,
-        frete: frete,
-        tipo_frete: tipo_frete || null,
-
-        status: "Pendente",
-        metodo_pagamento: "Mercado Pago"
-      })
-
-
-      .select()
-      .single();
 
     if (erroPedido) {
       console.error("Erro Supabase (pedido):", erroPedido);
