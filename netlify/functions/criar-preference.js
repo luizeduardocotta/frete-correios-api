@@ -62,20 +62,20 @@ exports.handler = async (event) => {
     const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
       .insert({
-        loja_id,
+        loja_id, // 🔥 FUNDAMENTAL para multi-loja
         cliente_id: cliente?.id || null,
         nome_cliente: cliente?.nome || payer?.name || null,
         whatsapp: cliente?.whatsapp || null,
+        email_cliente: payer?.email || null,
+
         total: totalCalculado,
         frete: frete,
         tipo_frete: tipo_frete || null,
-        status: "Pendente",
-        metodo_pagamento: "Mercado Pago",
 
-        // 🔥 ADIÇÕES PARA O ADMIN
-        valor_total: totalCalculado,
-        endereco: cliente?.endereco || null
+        status: "Pendente",
+        metodo_pagamento: "Mercado Pago"
       })
+
 
       .select()
       .single();
@@ -168,4 +168,3 @@ exports.handler = async (event) => {
     };
   }
 };
-
