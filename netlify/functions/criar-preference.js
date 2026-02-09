@@ -70,8 +70,13 @@ exports.handler = async (event) => {
         frete: frete,
         tipo_frete: tipo_frete || null,
         status: "Pendente",
-        metodo_pagamento: "Mercado Pago"
+        metodo_pagamento: "Mercado Pago",
+
+        // 🔥 ADIÇÕES PARA O ADMIN
+        valor_total: totalCalculado,
+        endereco: cliente?.endereco || null
       })
+
       .select()
       .single();
 
@@ -163,3 +168,4 @@ exports.handler = async (event) => {
     };
   }
 };
+
