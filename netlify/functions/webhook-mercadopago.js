@@ -8,22 +8,20 @@ const supabase = createClient(
 
 exports.handler = async (event) => {
   try {
-    // Mercado Pago envia POST
     if (event.httpMethod !== "POST") {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
     const body = JSON.parse(event.body);
 
-    // Só processa pagamentos
     if (body.type !== "payment") {
       return { statusCode: 200, body: "Evento ignorado" };
     }
 
     const paymentId = body.data.id;
 
-    // 🔎 Busca pagamento no Mercado Pago
-    const mpRes = await fetch(
+    // 🔎 1️⃣ Busca pagamento (primeiro sem token da loja ainda)
+    const mpResMaster = await fetch(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
       {
         headers: {
@@ -32,36 +30,46 @@ exports.handler = async (event) => {
       }
     );
 
-    const payment = await mpRes.json();
+    const payment = await mpResMaster.json();
 
-    // Processa somente pagamento aprovado
     if (payment.status !== "approved") {
-      return { statusCode: 200, body: "Pagamento ainda não aprovado" };
+      return { statusCode: 200, body: "Pagamento não aprovado" };
     }
 
-    const preferenceId = payment.preference_id;
+    // 🔥 2️⃣ Pedido vem do external_reference
+    const pedidoId = Number(payment.external_reference);
 
-    if (!preferenceId) {
-      return { statusCode: 200, body: "Preference não encontrada" };
+    if (!pedidoId) {
+      return { statusCode: 200, body: "Pedido não identificado" };
     }
 
-    // 🔎 Localiza pedido existente (criado no criar-preference)
-    const { data: pedido, error: erroPedido } = await supabase
+    // 🔎 3️⃣ Busca pedido
+    const { data: pedido } = await supabase
       .from('pedidos')
-      .select('id, status')
-      .eq('mp_preference_id', preferenceId)
+      .select('id, loja_id, status')
+      .eq('id', pedidoId)
       .single();
 
-    if (erroPedido || !pedido) {
-      return { statusCode: 200, body: "Pedido não localizado" };
+    if (!pedido) {
+      return { statusCode: 200, body: "Pedido não encontrado" };
     }
 
-    // 🛑 Evita reprocessar
     if (pedido.status === "PAGO") {
-      return { statusCode: 200, body: "Pedido já confirmado" };
+      return { statusCode: 200, body: "Pedido já processado" };
     }
 
-    // ✅ Atualiza pedido
+    // 🔎 4️⃣ Busca token da loja
+    const { data: loja } = await supabase
+      .from('lojas')
+      .select('mp_access_token')
+      .eq('id', pedido.loja_id)
+      .single();
+
+    if (!loja?.mp_access_token) {
+      throw new Error("Token MP da loja não encontrado");
+    }
+
+    // ✅ 5️⃣ Atualiza pedido
     await supabase
       .from('pedidos')
       .update({
@@ -80,4 +88,3 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: err.message };
   }
 };
-
