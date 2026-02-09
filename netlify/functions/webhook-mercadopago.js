@@ -8,15 +8,21 @@ const supabase = createClient(
 
 exports.handler = async (event) => {
   try {
+    // Mercado Pago envia POST
+    if (event.httpMethod !== "POST") {
+      return { statusCode: 405, body: "Method Not Allowed" };
+    }
+
     const body = JSON.parse(event.body);
 
+    // Só processa pagamentos
     if (body.type !== "payment") {
-      return { statusCode: 200, body: "ok" };
+      return { statusCode: 200, body: "Evento ignorado" };
     }
 
     const paymentId = body.data.id;
 
-    // 🔎 Buscar pagamento no Mercado Pago
+    // 🔎 Busca pagamento no Mercado Pago
     const mpRes = await fetch(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
       {
@@ -28,35 +34,49 @@ exports.handler = async (event) => {
 
     const payment = await mpRes.json();
 
+    // Processa somente pagamento aprovado
     if (payment.status !== "approved") {
-      return { statusCode: 200, body: "Pagamento não aprovado ainda" };
+      return { statusCode: 200, body: "Pagamento ainda não aprovado" };
     }
 
-    // 🛑 Evita duplicar pedido
-    const { data: existente } = await supabase
+    const preferenceId = payment.order?.id;
+
+    if (!preferenceId) {
+      return { statusCode: 200, body: "Preference não encontrada" };
+    }
+
+    // 🔎 Localiza pedido existente (criado no criar-preference)
+    const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
-      .select('id')
-      .eq('mp_payment_id', paymentId)
+      .select('id, status')
+      .eq('mp_preference_id', preferenceId)
       .single();
 
-    if (existente) {
-      return { statusCode: 200, body: "Pedido já registrado" };
+    if (erroPedido || !pedido) {
+      return { statusCode: 200, body: "Pedido não localizado" };
     }
 
-    // ✅ Cria pedido definitivo
-    await supabase.from('pedidos').insert({
-      mp_payment_id: paymentId,
-      mp_preference_id: payment.order?.id || null,
-      status: "Pago",
-      metodo_pagamento: payment.payment_method_id,
-      total: payment.transaction_amount,
-      email_cliente: payment.payer?.email || null
-    });
+    // 🛑 Evita reprocessar
+    if (pedido.status === "PAGO") {
+      return { statusCode: 200, body: "Pedido já confirmado" };
+    }
 
-    return { statusCode: 200, body: "Pedido salvo com sucesso" };
+    // ✅ Atualiza pedido
+    await supabase
+      .from('pedidos')
+      .update({
+        status: "PAGO",
+        mp_payment_id: payment.id,
+        metodo_pagamento: payment.payment_method_id,
+        total: payment.transaction_amount,
+        email_cliente: payment.payer?.email || null
+      })
+      .eq('id', pedido.id);
+
+    return { statusCode: 200, body: "Pedido atualizado com sucesso" };
 
   } catch (err) {
-    console.error(err);
+    console.error("Webhook MP erro:", err);
     return { statusCode: 500, body: err.message };
   }
 };
