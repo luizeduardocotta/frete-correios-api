@@ -31,7 +31,28 @@ exports.handler = async (event) => {
       cliente
     } = body;
 
-    // 1. Busca token do Mercado Pago
+    // 1️⃣ Cria pedido PENDENTE
+    const { data: pedido, error: erroPedido } = await supabase
+      .from('pedidos')
+      .insert({
+        loja_id,
+        cliente_id: cliente?.id || null,
+        nome_cliente: cliente?.nome || payer?.name,
+        whatsapp: cliente?.whatsapp || null,
+        total: valor_total,
+        frete: valor_frete,
+        tipo_frete,
+        status: "PENDENTE",
+        metodo_pagamento: "Mercado Pago"
+      })
+      .select()
+      .single();
+
+    if (erroPedido) {
+      throw new Error("Erro ao criar pedido");
+    }
+
+    // 2️⃣ Busca token do Mercado Pago
     const { data: loja, error: erroLoja } = await supabase
       .from('lojas')
       .select('mp_access_token')
@@ -39,78 +60,55 @@ exports.handler = async (event) => {
       .single();
 
     if (erroLoja || !loja?.mp_access_token) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ erro: "Token não configurado no banco." })
-      };
+      throw new Error("Token do Mercado Pago não configurado");
     }
 
-    // 2. Cria preferência no Mercado Pago
-    const mpResponse = await fetch("https://api.mercadopago.com/checkout/preferences", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${loja.mp_access_token.trim()}`
-      },
-      body: JSON.stringify({
-        items,
-        payer: {
-          name: payer?.name || "Cliente",
-          email: payer?.email || "comprador@email.com",
-          address: {
-            street_name: payer?.address?.street_name || "Endereço não informado"
-          }
+    // 3️⃣ Cria preferência no Mercado Pago
+    const mpResponse = await fetch(
+      "https://api.mercadopago.com/checkout/preferences",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${loja.mp_access_token.trim()}`
         },
-        payment_methods: {
-          included_payment_types: [
-            { id: "ticket" },
-            { id: "bank_transfer" },
-            { id: "credit_card" }
-          ],
-          installments: 12
-        },
-        back_urls: {
-          success: "https://portallagoasanta.com.br/",
-          failure: "https://portallagoasanta.com.br/",
-          pending: "https://portallagoasanta.com.br/"
-        },
-        auto_return: "approved"
-      })
-    });
+        body: JSON.stringify({
+          items,
+          payer,
+          back_urls: {
+            success: "https://portallagoasanta.com.br/",
+            failure: "https://portallagoasanta.com.br/",
+            pending: "https://portallagoasanta.com.br/"
+          },
+          auto_return: "approved"
+        })
+      }
+    );
 
     const result = await mpResponse.json();
 
     if (!mpResponse.ok) {
-      return {
-        statusCode: mpResponse.status,
-        headers,
-        body: JSON.stringify({ erro: "Erro MP", detalhes: result })
-      };
+      throw new Error("Erro ao criar preferência no Mercado Pago");
     }
 
-    // 3. Salva pedido no Supabase
-    await supabase.from('pedidos').insert({
-      loja_id,
-      cliente_id: cliente?.id || null,
-      nome_cliente: cliente?.nome || payer?.name,
-      whatsapp: cliente?.whatsapp || null,
+    // 4️⃣ Atualiza pedido com preference_id
+    await supabase
+      .from('pedidos')
+      .update({ mp_preference_id: result.id })
+      .eq('id', pedido.id);
 
-      total: valor_total,
-      frete: valor_frete,
-      tipo_frete,
-      status: "Pendente",
-      metodo_pagamento: "Mercado Pago",
-      mp_preference_id: result.id
-    });
-
+    // 5️⃣ Retorna init_point
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ init_point: result.init_point })
+      body: JSON.stringify({
+        init_point: result.init_point,
+        pedido_id: pedido.id
+      })
     };
 
   } catch (err) {
+    console.error(err);
     return {
       statusCode: 500,
       headers,
