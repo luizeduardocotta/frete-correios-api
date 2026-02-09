@@ -39,7 +39,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: "Pagamento ainda não aprovado" };
     }
 
-    const preferenceId = payment.order?.id;
+    const preferenceId = payment.preference_id;
 
     if (!preferenceId) {
       return { statusCode: 200, body: "Preference não encontrada" };
