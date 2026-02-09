@@ -27,7 +27,7 @@ exports.handler = async (event) => {
       payer,
       tipo_frete,
       valor_frete,
-      valor_total, // 🔎 só para debug
+      valor_total, // apenas debug
       cliente
     } = body;
 
@@ -39,7 +39,7 @@ exports.handler = async (event) => {
       throw new Error("Loja não informada");
     }
 
-    // 🔢 1️⃣ CALCULA TOTAL NO BACKEND (REGRA DE OURO)
+    // 🔢 1️⃣ CALCULA TOTAL NO BACKEND
     const subtotal = items.reduce((acc, item) => {
       return acc + (Number(item.unit_price) * Number(item.quantity));
     }, 0);
@@ -51,7 +51,6 @@ exports.handler = async (event) => {
       throw new Error("Total inválido");
     }
 
-    // 🧪 LOG DE DEBUG (ESSENCIAL)
     console.log("DEBUG PEDIDO:", {
       subtotal,
       frete,
@@ -59,7 +58,7 @@ exports.handler = async (event) => {
       valor_total_recebido: valor_total
     });
 
-    // 2️⃣ CRIA PEDIDO PENDENTE NO SUPABASE
+    // 2️⃣ CRIA PEDIDO PENDENTE
     const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
       .insert({
@@ -67,7 +66,7 @@ exports.handler = async (event) => {
         cliente_id: cliente?.id || null,
         nome_cliente: cliente?.nome || payer?.name || null,
         whatsapp: cliente?.whatsapp || null,
-        total: totalCalculado,        // ✅ NUNCA NULL
+        total: totalCalculado,
         frete: frete,
         tipo_frete: tipo_frete || null,
         status: "Pendente",
@@ -77,11 +76,28 @@ exports.handler = async (event) => {
       .single();
 
     if (erroPedido) {
-      console.error("Erro Supabase:", erroPedido);
-      throw new Error(erroPedido.message);
+      console.error("Erro Supabase (pedido):", erroPedido);
+      throw new Error("Erro ao criar pedido");
     }
 
-    // 3️⃣ BUSCA TOKEN DO MERCADO PAGO DA LOJA
+    // 3️⃣ SALVA ITENS DO PEDIDO 🔥🔥🔥
+    const itensParaInserir = items.map(item => ({
+      pedido_id: pedido.id,
+      produto_id: item.id ? Number(item.id) : null,
+      quantidade: Number(item.quantity),
+      preco_unitario: Number(item.unit_price)
+    }));
+
+    const { error: erroItens } = await supabase
+      .from('itens_pedido')
+      .insert(itensParaInserir);
+
+    if (erroItens) {
+      console.error("Erro Supabase (itens):", erroItens);
+      throw new Error("Erro ao salvar itens do pedido");
+    }
+
+    // 4️⃣ BUSCA TOKEN DO MP DA LOJA
     const { data: loja, error: erroLoja } = await supabase
       .from('lojas')
       .select('mp_access_token')
@@ -92,7 +108,7 @@ exports.handler = async (event) => {
       throw new Error("Token do Mercado Pago não configurado");
     }
 
-    // 4️⃣ CRIA PREFERENCE NO MERCADO PAGO
+    // 5️⃣ CRIA PREFERENCE NO MERCADO PAGO
     const mpResponse = await fetch(
       "https://api.mercadopago.com/checkout/preferences",
       {
@@ -104,7 +120,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({
           items,
           payer,
-          external_reference: String(pedido.id), // 🔥 BOA PRÁTICA
+          external_reference: String(pedido.id), // 🔥 referência interna
           back_urls: {
             success: "https://portallagoasanta.com.br/",
             failure: "https://portallagoasanta.com.br/",
@@ -122,15 +138,13 @@ exports.handler = async (event) => {
       throw new Error("Erro ao criar preferência no Mercado Pago");
     }
 
-    // 5️⃣ ATUALIZA PEDIDO COM mp_preference_id
+    // 6️⃣ ATUALIZA PEDIDO COM preference_id
     await supabase
       .from('pedidos')
-      .update({
-        mp_preference_id: result.id
-      })
+      .update({ mp_preference_id: result.id })
       .eq('id', pedido.id);
 
-    // 6️⃣ RETORNA INIT_POINT
+    // 7️⃣ RETORNO FINAL
     return {
       statusCode: 200,
       headers,
@@ -149,4 +163,3 @@ exports.handler = async (event) => {
     };
   }
 };
-
