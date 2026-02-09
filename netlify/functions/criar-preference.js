@@ -31,25 +31,29 @@ exports.handler = async (event) => {
       cliente
     } = body;
 
+    // 🔎 Logs úteis
+    console.log("Criando pedido:", { loja_id, valor_total });
+
     // 1️⃣ Cria pedido PENDENTE
     const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
       .insert({
-        loja_id,
+        loja_id: loja_id || null,
         cliente_id: cliente?.id || null,
-        nome_cliente: cliente?.nome || payer?.name,
+        nome_cliente: cliente?.nome || payer?.name || null,
         whatsapp: cliente?.whatsapp || null,
-        total: valor_total,
-        frete: valor_frete,
-        tipo_frete,
-        status: "PENDENTE",
+        total: Number(valor_total),
+        frete: Number(valor_frete) || 0,
+        tipo_frete: tipo_frete || null,
+        status: "Pendente",
         metodo_pagamento: "Mercado Pago"
       })
       .select()
       .single();
 
     if (erroPedido) {
-      throw new Error("Erro ao criar pedido");
+      console.error("Erro Supabase:", erroPedido);
+      throw new Error(erroPedido.message);
     }
 
     // 2️⃣ Busca token do Mercado Pago
@@ -88,7 +92,7 @@ exports.handler = async (event) => {
     const result = await mpResponse.json();
 
     if (!mpResponse.ok) {
-      throw new Error("Erro ao criar preferência no Mercado Pago");
+      throw new Error(JSON.stringify(result));
     }
 
     // 4️⃣ Atualiza pedido com preference_id
@@ -108,7 +112,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error(err);
+    console.error("Erro geral:", err);
     return {
       statusCode: 500,
       headers,
@@ -116,3 +120,4 @@ exports.handler = async (event) => {
     };
   }
 };
+
